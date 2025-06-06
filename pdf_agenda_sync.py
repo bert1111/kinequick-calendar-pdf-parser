@@ -16,7 +16,7 @@ class PdfAgendaSync(hass.Hass):
         self.calendar_entity = "calendar.jouw_google_agenda"  # <-- PAS AAN
 
         # Event duur in minuten
-        self.event_duration = 45
+        self.event_duration = 30
 
     def sync_pdf_to_calendar(self, kwargs):
         self.log("Start synchronisatie van PDF agenda...")
