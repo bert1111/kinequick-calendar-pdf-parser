@@ -12,6 +12,27 @@ def split_columns(line, col_width=27, num_cols=7):
     # Knip de regel in stukken van col_width
     return [line[i*col_width:(i+1)*col_width].strip() for i in range(num_cols)]
 
+def clean_time_lines(lines, skip_hour=198, skip_quarter=194):
+    cleaned = []
+    for line in lines:
+        # Controleer op uurregel (bv. 09:00)
+        m_hour = re.match(r"^(\d{2}:\d{2})", line.strip())
+        if m_hour:
+            uur_einde = line.find(m_hour.group(1)) + 5  # positie direct na het uur
+            new_line = line[:uur_einde] + line[uur_einde+skip_hour:]
+            cleaned.append(new_line)
+            continue
+        # Controleer op kwartierregel (15, 30, 45)
+        m_quarter = re.match(r"^(15|30|45)", line.strip())
+        if m_quarter:
+            kwart_einde = line.find(m_quarter.group(1)) + len(m_quarter.group(1))
+            new_line = line[:kwart_einde] + line[kwart_einde+skip_quarter:]
+            cleaned.append(new_line)
+            continue
+        # Anders: laat de regel ongemoeid
+        cleaned.append(line)
+    return cleaned
+
 def parse_agenda(lines):
     # Zoek de regel met de datums
     date_line_idx = None
@@ -37,11 +58,15 @@ def parse_agenda(lines):
         line = lines[i]
         line_strip = line.strip()
 
+        # Debug: print de huidige regel
+        print(f"Regel {i}: '{line_strip}'")
+
         # Check of het een uurregel is (bv. '09:00')
-        m_time = re.match(r"^(\d{2}:\d{2})", line_strip)
+        m_time = re.match(r"^(\d{2}:\d{2})$", line_strip)
         if m_time:
             current_hour = m_time.group(1)
             current_quarter = 0
+            print(f"  Nieuw uur gevonden: {current_hour}")
             i += 1
             continue
 
@@ -49,26 +74,27 @@ def parse_agenda(lines):
         m_quarter = re.match(r"^(15|30|45)$", line_strip)
         if m_quarter and current_hour:
             current_quarter = int(m_quarter.group(1))
+            print(f"  Kwartier gevonden: {current_quarter} minuten")
             i += 1
             continue
 
         if not current_hour:
+            print("  Geen huidig uur actief, overslaan.")
             i += 1
             continue
 
         # Splits de namenregel in kolommen van vaste breedte
         name_cols = split_columns(line, col_width=27, num_cols=num_cols)
-        # Vul aan tot het juiste aantal kolommen
         while len(name_cols) < num_cols:
             name_cols.append("")
         for col in range(num_cols):
             text = name_cols[col]
             if text and not re.match(r"^\d+$", text):  # geen alleen cijfers
                 date_str = date_cols[col]
-                # Bouw starttijd
                 dt_start = datetime.strptime(f"{date_str} {current_hour}", "%d/%m %H:%M")
                 dt_start += timedelta(minutes=current_quarter)
-                dt_end = dt_start + timedelta(minutes=30)  # vaste duur
+                dt_end = dt_start + timedelta(minutes=30)
+                print(f"  Afspraak: {text} op {date_str} om {dt_start.strftime('%H:%M')}")
                 appointments.append({
                     "date": date_str,
                     "start_time": dt_start.strftime("%H:%M"),
@@ -82,7 +108,7 @@ def parse_agenda(lines):
 @service
 async def agenda_sync_txt(
     url="http://homeassistant:8123/local/agenda.txt",
-    calendar_entity="calendar.odeyn_agenda"
+    calendar_entity="calendar.your_agenda"
 ):
     if isinstance(calendar_entity, list):
         calendar_entity = calendar_entity[0]
@@ -95,7 +121,12 @@ async def agenda_sync_txt(
             log.error(f"Kon TXT niet downloaden, status code: {response.status_code}")
             return
         text = response.text
+
+        # Split de tekst in regels
         lines = text.splitlines()
+        # Verwijder na elk heel uur de eerste 198 tekens, na elke kwartierregel (15/30/45) de eerste 194 tekens
+        lines = clean_time_lines(lines, skip_hour=198, skip_quarter=194)
+
     except Exception as e:
         log.error(f"Fout bij downloaden van TXT: {e}")
         return
