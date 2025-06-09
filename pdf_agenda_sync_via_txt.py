@@ -106,7 +106,7 @@ def parse_agenda(normalized_lines):
 @service
 async def agenda_sync_txt(
     url="http://homeassistant:8123/local/agenda.txt",
-    calendar_entity="calendar.odeyn_agenda"
+    calendar_entity="calendar.your_agenda"
 ):
     if isinstance(calendar_entity, list):
         calendar_entity = calendar_entity[0]
