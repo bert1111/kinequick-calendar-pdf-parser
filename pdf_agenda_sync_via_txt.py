@@ -2,99 +2,98 @@ import asyncio
 from datetime import datetime, timedelta
 import re
 import requests
+from collections import defaultdict
 
-def split_columns(line, col_width=27, num_cols=7):
-    # Verwijder tijd rechts
-    line = re.sub(r"\s+\d{2}:\d{2}\s*$", "", line)
-    # Vul de regel aan tot de juiste lengte
-    if len(line) < col_width * num_cols:
-        line = line.ljust(col_width * num_cols)
-    # Knip de regel in stukken van col_width
-    return [line[i*col_width:(i+1)*col_width].strip() for i in range(num_cols)]
+# Kolombreedtes en instellingen
+LEFT_WIDTH = 7
+DAY_WIDTH = 27
+NUM_DAYS = 7
+RIGHT_WIDTH = 6
+SPACER = "-"
 
-def clean_time_lines(lines, skip_hour=198, skip_quarter=194):
-    cleaned = []
+def normalize_fixed_width(lines, left=LEFT_WIDTH, day=DAY_WIDTH, days=NUM_DAYS, right=RIGHT_WIDTH, spacer=SPACER):
+    norm_lines = []
     for line in lines:
-        # Controleer op uurregel (bv. 09:00)
-        m_hour = re.match(r"^(\d{2}:\d{2})", line.strip())
-        if m_hour:
-            uur_einde = line.find(m_hour.group(1)) + 5  # positie direct na het uur
-            new_line = line[:uur_einde] + line[uur_einde+skip_hour:]
-            cleaned.append(new_line)
-            continue
-        # Controleer op kwartierregel (15, 30, 45)
-        m_quarter = re.match(r"^(15|30|45)", line.strip())
-        if m_quarter:
-            kwart_einde = line.find(m_quarter.group(1)) + len(m_quarter.group(1))
-            new_line = line[:kwart_einde] + line[kwart_einde+skip_quarter:]
-            cleaned.append(new_line)
-            continue
-        # Anders: laat de regel ongemoeid
-        cleaned.append(line)
-    return cleaned
+        needed_len = left + day*days + right
+        if len(line) < needed_len:
+            line = line.ljust(needed_len)
+        pos = 0
+        cols = []
+        leftval = line[pos:pos+left].strip() or spacer
+        cols.append(leftval)
+        pos += left
+        for i in range(days):
+            dayval = line[pos:pos+day].strip() or spacer
+            cols.append(dayval)
+            pos += day
+        rightval = line[pos:pos+right].strip() or spacer
+        cols.append(rightval)
+        norm_lines.append("|" + "|".join(cols) + "|")
+    return norm_lines
 
-def parse_agenda(lines):
-    # Zoek de regel met de datums
+def parse_agenda(normalized_lines):
+    # Zoek de headerregel met datums
     date_line_idx = None
-    for idx, line in enumerate(lines):
+    for idx, line in enumerate(normalized_lines):
         if re.search(r"\d{2}/\d{2}", line):
             date_line_idx = idx
             break
     if date_line_idx is None:
-        raise ValueError("Geen datums gevonden in tekst")
-
-    # Haal de datums uit de kopregel
-    date_line = lines[date_line_idx]
-    date_cols = split_columns(date_line)
-    num_cols = len(date_cols)
-
+        raise Exception("Geen datumregel gevonden")
+    header_cols = normalized_lines[date_line_idx].split('|')[1:-1]
+    date_cols = header_cols[1:1+NUM_DAYS]  # sla de eerste kolom (links) over
     appointments = []
     current_hour = None
     current_quarter = 0
-    i = date_line_idx + 1
     year = datetime.now().year
-
-    while i < len(lines):
-        line = lines[i]
-        line_strip = line.strip()
-
-        # Debug: print de huidige regel
-        print(f"Regel {i}: '{line_strip}'")
-
-        # Check of het een uurregel is (bv. '09:00')
-        m_time = re.match(r"^(\d{2}:\d{2})$", line_strip)
+    i = date_line_idx + 1
+    while i < len(normalized_lines):
+        line = normalized_lines[i]
+        cols = line.split('|')[1:-1]
+        left = cols[0].strip()
+        right = cols[-1].strip()
+        # Herken uurregel (links/rechts)
+        m_time = re.match(r"^(\d{2}:\d{2})$", left)
+        m_time_r = re.match(r"^(\d{2}:\d{2})$", right)
         if m_time:
             current_hour = m_time.group(1)
             current_quarter = 0
-            print(f"  Nieuw uur gevonden: {current_hour}")
             i += 1
             continue
-
-        # Check of het een kwartierregel is (15,30,45)
-        m_quarter = re.match(r"^(15|30|45)$", line_strip)
+        elif m_time_r:
+            current_hour = m_time_r.group(1)
+            current_quarter = 0
+            i += 1
+            continue
+        # Herken kwartierregel (links/rechts)
+        m_quarter = re.match(r"^(15|30|45)$", left)
+        m_quarter_r = re.match(r"^(15|30|45)$", right)
         if m_quarter and current_hour:
             current_quarter = int(m_quarter.group(1))
-            print(f"  Kwartier gevonden: {current_quarter} minuten")
             i += 1
             continue
-
+        elif m_quarter_r and current_hour:
+            current_quarter = int(m_quarter_r.group(1))
+            i += 1
+            continue
+        # Alleen verwerken als er een actief uur is
         if not current_hour:
-            print("  Geen huidig uur actief, overslaan.")
             i += 1
             continue
-
-        # Splits de namenregel in kolommen van vaste breedte
-        name_cols = split_columns(line, col_width=27, num_cols=num_cols)
-        while len(name_cols) < num_cols:
-            name_cols.append("")
-        for col in range(num_cols):
-            text = name_cols[col]
-            if text and not re.match(r"^\d+$", text):  # geen alleen cijfers
+        # Dagkolommen zijn kolom 1 t/m 7
+        for col in range(NUM_DAYS):
+            text = cols[col+1].strip()
+            if text and text != SPACER and not re.match(r"^\d+$", text):
                 date_str = date_cols[col]
-                dt_start = datetime.strptime(f"{date_str} {current_hour}", "%d/%m %H:%M")
+                if date_str == "-":
+                    continue
+                try:
+                    dt_start = datetime.strptime(f"{date_str} {current_hour}", "%d/%m %H:%M")
+                except Exception as e:
+                    log.error(f"Fout bij datum/tijd: {e} (kolom {col}, waarde '{text}')")
+                    continue
                 dt_start += timedelta(minutes=current_quarter)
                 dt_end = dt_start + timedelta(minutes=30)
-                print(f"  Afspraak: {text} op {date_str} om {dt_start.strftime('%H:%M')}")
                 appointments.append({
                     "date": date_str,
                     "start_time": dt_start.strftime("%H:%M"),
@@ -102,13 +101,12 @@ def parse_agenda(lines):
                     "name": text
                 })
         i += 1
-
     return appointments
 
 @service
 async def agenda_sync_txt(
     url="http://homeassistant:8123/local/agenda.txt",
-    calendar_entity="calendar.your_agenda"
+    calendar_entity="calendar.odeyn_agenda"
 ):
     if isinstance(calendar_entity, list):
         calendar_entity = calendar_entity[0]
@@ -121,46 +119,67 @@ async def agenda_sync_txt(
             log.error(f"Kon TXT niet downloaden, status code: {response.status_code}")
             return
         text = response.text
-
-        # Split de tekst in regels
         lines = text.splitlines()
-        # Verwijder na elk heel uur de eerste 198 tekens, na elke kwartierregel (15/30/45) de eerste 194 tekens
-        lines = clean_time_lines(lines, skip_hour=198, skip_quarter=194)
-
     except Exception as e:
         log.error(f"Fout bij downloaden van TXT: {e}")
         return
 
+    # Normaliseer de tekst en vul lege kolommen met spacer
+    try:
+        normalized = normalize_fixed_width(lines)
+        for idx, l in enumerate(normalized):
+            log.debug(f"GENORMALISEERDE REGEL {idx}: {l}")
+    except Exception as e:
+        log.error(f"Fout bij normaliseren van TXT: {e}")
+        return
+
     # Parse afspraken uit het TXT-bestand
     try:
-        appointments = parse_agenda(lines)
+        appointments = parse_agenda(normalized)
     except Exception as e:
         log.error(f"Fout bij parsen van TXT: {e}")
         return
 
-    log.info(f"Gevonden afspraken: {appointments}")
+    log.info(f"Gevonden afspraken: {len(appointments)}")
+
+    # Optioneel: overzicht per dag in de log
+    by_day = defaultdict(list)
+    for app in appointments:
+        by_day[app['date']].append(app)
+    dagen = sorted(by_day.keys(), key=lambda d: datetime.strptime(d, "%d/%m"))
+    for dag in dagen:
+        log.info(f"Dag {dag}:")
+        for app in sorted(by_day[dag], key=lambda a: a['start_time']):
+            log.info(f"  {app['start_time']} - {app['end_time']}: {app['name']}")
+
+    if not appointments:
+        log.warning("Geen afspraken gevonden! Controleer het TXT-bestand en parsing.")
+        return
 
     year = datetime.now().year
 
     # Voeg nieuwe afspraken toe via HA-script, met vertraging
     for app in appointments:
-        app_date = f"{year}-{app['date'][3:5]}-{app['date'][0:2]}"
-        start_iso = f"{app_date}T{app['start_time']}:00+02:00"
-        end_iso = f"{app_date}T{app['end_time']}:00+02:00"
-        eid = calendar_entity if isinstance(calendar_entity, str) else calendar_entity[0]
-        await task.executor(
-            hass.services.call,
-            "script",
-            "voeg_agenda_item_toe",
-            {
-                "entity_id": eid,
-                "summary": app['name'],
-                "description": "Afspraak uit TXT agenda",
-                "start_date_time": start_iso,
-                "end_date_time": end_iso,
-            }
-        )
-        log.info(f"Toegevoegd via script: {app}")
-        await asyncio.sleep(0.5)  # Pauze om 'maximum number of runs' te voorkomen
+        try:
+            app_date = f"{year}-{app['date'][3:5]}-{app['date'][0:2]}"
+            start_iso = f"{app_date}T{app['start_time']}:00+02:00"
+            end_iso = f"{app_date}T{app['end_time']}:00+02:00"
+            eid = calendar_entity if isinstance(calendar_entity, str) else calendar_entity[0]
+            log.info(f"Toevoegen aan agenda: {app['name']} op {start_iso} - {end_iso}")
+            await task.executor(
+                hass.services.call,
+                "script",
+                "voeg_agenda_item_toe",  # Pas aan naar jouw scriptnaam!
+                {
+                    "entity_id": eid,
+                    "summary": app['name'],
+                    "description": "Afspraak uit TXT agenda",
+                    "start_date_time": start_iso,
+                    "end_date_time": end_iso,
+                }
+            )
+            await asyncio.sleep(3.0)  # Pauze om 'maximum number of runs' te voorkomen
+        except Exception as e:
+            log.error(f"Fout bij toevoegen van afspraak: {e} ({app})")
 
     log.info("Agenda synchronisatie voltooid.")
