@@ -47,7 +47,7 @@ Reboot (For the Shell command to be able to run)
    In my case the shell command has to run first, but this is not necessary if you save the file straight to the "www" folder. (Not recommended)
 
 	To make the file you need, you have to open the KineQuick calendar and click print.
-	(I use "Foxit PDF Reader" but any pdf reader that can save as "txt" format will do I think, but that's not tested)
+	(I use "Foxit PDF Reader" but any pdf reader that can save as "txt" format will do I think, but that's not tested).
 	Your pdf reader will open a pdf. Then select the "Save as" option and save as "agenda.txt" in the desired location.
 
 
