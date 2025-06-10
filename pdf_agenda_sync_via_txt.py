@@ -4,7 +4,6 @@ import re
 import requests
 from collections import defaultdict
 
-# Kolombreedtes en instellingen
 LEFT_WIDTH = 7
 DAY_WIDTH = 27
 NUM_DAYS = 7
@@ -32,7 +31,6 @@ def normalize_fixed_width(lines, left=LEFT_WIDTH, day=DAY_WIDTH, days=NUM_DAYS, 
     return norm_lines
 
 def parse_agenda(normalized_lines):
-    # Zoek de headerregel met datums
     date_line_idx = None
     for idx, line in enumerate(normalized_lines):
         if re.search(r"\d{2}/\d{2}", line):
@@ -41,18 +39,16 @@ def parse_agenda(normalized_lines):
     if date_line_idx is None:
         raise Exception("Geen datumregel gevonden")
     header_cols = normalized_lines[date_line_idx].split('|')[1:-1]
-    date_cols = header_cols[1:1+NUM_DAYS]  # sla de eerste kolom (links) over
+    date_cols = header_cols[1:1+NUM_DAYS]
     appointments = []
     current_hour = None
     current_quarter = 0
-    year = datetime.now().year
     i = date_line_idx + 1
     while i < len(normalized_lines):
         line = normalized_lines[i]
         cols = line.split('|')[1:-1]
         left = cols[0].strip()
         right = cols[-1].strip()
-        # Herken uurregel (links/rechts)
         m_time = re.match(r"^(\d{2}:\d{2})$", left)
         m_time_r = re.match(r"^(\d{2}:\d{2})$", right)
         if m_time:
@@ -65,7 +61,6 @@ def parse_agenda(normalized_lines):
             current_quarter = 0
             i += 1
             continue
-        # Herken kwartierregel (links/rechts)
         m_quarter = re.match(r"^(15|30|45)$", left)
         m_quarter_r = re.match(r"^(15|30|45)$", right)
         if m_quarter and current_hour:
@@ -76,11 +71,9 @@ def parse_agenda(normalized_lines):
             current_quarter = int(m_quarter_r.group(1))
             i += 1
             continue
-        # Alleen verwerken als er een actief uur is
         if not current_hour:
             i += 1
             continue
-        # Dagkolommen zijn kolom 1 t/m 7
         for col in range(NUM_DAYS):
             text = cols[col+1].strip()
             if text and text != SPACER and not re.match(r"^\d+$", text):
@@ -103,10 +96,27 @@ def parse_agenda(normalized_lines):
         i += 1
     return appointments
 
+def event_to_key(event):
+    """Maak een unieke sleutel van een event, ongeacht structuur."""
+    if isinstance(event, dict):
+        summary = event.get("summary") or event.get("message") or ""
+        description = event.get("description") or ""
+        start = event.get("start")
+        if isinstance(start, dict):
+            start_time = start.get("dateTime") or start.get("date") or ""
+        elif isinstance(start, str):
+            start_time = start
+        else:
+            start_time = ""
+        return (summary.strip(), start_time[:16], description.strip())
+    elif isinstance(event, str):
+        return (event.strip(), "", "")
+    return ("", "", "")
+
 @service
 async def agenda_sync_txt(
     url="http://homeassistant:8123/local/agenda.txt",
-    calendar_entity="calendar.your_agenda"
+    calendar_entity="calendar.odeyn_agenda"
 ):
     if isinstance(calendar_entity, list):
         calendar_entity = calendar_entity[0]
@@ -124,7 +134,6 @@ async def agenda_sync_txt(
         log.error(f"Fout bij downloaden van TXT: {e}")
         return
 
-    # Normaliseer de tekst en vul lege kolommen met spacer
     try:
         normalized = normalize_fixed_width(lines)
         for idx, l in enumerate(normalized):
@@ -133,7 +142,6 @@ async def agenda_sync_txt(
         log.error(f"Fout bij normaliseren van TXT: {e}")
         return
 
-    # Parse afspraken uit het TXT-bestand
     try:
         appointments = parse_agenda(normalized)
     except Exception as e:
@@ -142,44 +150,86 @@ async def agenda_sync_txt(
 
     log.info(f"Gevonden afspraken: {len(appointments)}")
 
-    # Optioneel: overzicht per dag in de log
-    by_day = defaultdict(list)
-    for app in appointments:
-        by_day[app['date']].append(app)
-    dagen = sorted(by_day.keys(), key=lambda d: datetime.strptime(d, "%d/%m"))
-    for dag in dagen:
-        log.info(f"Dag {dag}:")
-        for app in sorted(by_day[dag], key=lambda a: a['start_time']):
-            log.info(f"  {app['start_time']} - {app['end_time']}: {app['name']}")
-
     if not appointments:
         log.warning("Geen afspraken gevonden! Controleer het TXT-bestand en parsing.")
         return
 
     year = datetime.now().year
 
-    # Voeg nieuwe afspraken toe via HA-script, met vertraging
+    # Verzamel alle datums waarop afspraken zijn
+    alle_datums = set()
     for app in appointments:
-        try:
-            app_date = f"{year}-{app['date'][3:5]}-{app['date'][0:2]}"
-            start_iso = f"{app_date}T{app['start_time']}:00+02:00"
-            end_iso = f"{app_date}T{app['end_time']}:00+02:00"
-            eid = calendar_entity if isinstance(calendar_entity, str) else calendar_entity[0]
-            log.info(f"Toevoegen aan agenda: {app['name']} op {start_iso} - {end_iso}")
-            await task.executor(
-                hass.services.call,
-                "script",
-                "voeg_agenda_item_toe",  # Pas aan naar jouw scriptnaam!
-                {
-                    "entity_id": eid,
-                    "summary": app['name'],
-                    "description": "Afspraak uit TXT agenda",
-                    "start_date_time": start_iso,
-                    "end_date_time": end_iso,
-                }
-            )
-            await asyncio.sleep(3.0)  # Pauze om 'maximum number of runs' te voorkomen
-        except Exception as e:
-            log.error(f"Fout bij toevoegen van afspraak: {e} ({app})")
+        app_date = f"{year}-{app['date'][3:5]}-{app['date'][0:2]}"
+        alle_datums.add(app_date)
+
+    # Haal per dag de bestaande events op
+    bestaande_events_per_dag = dict()
+    for datum in alle_datums:
+        start_iso = f"{datum}T00:00:00+02:00"
+        end_iso = f"{datum}T23:59:59+02:00"
+        events = await task.executor(
+            hass.services.call,
+            "calendar",
+            "get_events",
+            {
+                "entity_id": calendar_entity,
+                "start_date_time": start_iso,
+                "end_date_time": end_iso,
+            },
+            blocking=True,
+            return_response=True
+        )
+        log.warning(f"DEBUG: Events van {datum}: {repr(events)}")
+        # Pak de juiste lijst uit de geneste structuur
+        event_list = []
+        if isinstance(events, dict):
+            for cal_key in events:
+                cal_val = events[cal_key]
+                if isinstance(cal_val, dict) and "events" in cal_val:
+                    event_list = cal_val["events"]
+                else:
+                    event_list = []
+                break
+        elif isinstance(events, list):
+            event_list = events
+        elif events is None:
+            event_list = []
+        else:
+            event_list = [events]
+        bestaande_events_per_dag[datum] = event_list
+
+    # Voeg nieuwe afspraken toe, alleen als ze nog niet bestaan
+    for app in appointments:
+        app_date = f"{year}-{app['date'][3:5]}-{app['date'][0:2]}"
+        start_iso = f"{app_date}T{app['start_time']}:00+02:00"
+        end_iso = f"{app_date}T{app['end_time']}:00+02:00"
+
+        # Log alle bestaande events voor debug
+        log.warning(f"DEBUG: Events per dag {app_date}: {repr(bestaande_events_per_dag[app_date])}")
+
+        # Maak een set met bestaande event keys zonder generator-expressie
+        bestaande_keys = set()
+        for ev in bestaande_events_per_dag[app_date]:
+            bestaande_keys.add(event_to_key(ev))
+
+        nieuwe_key = (app['name'].strip(), start_iso[:16], "Afspraak uit TXT agenda")
+        if nieuwe_key in bestaande_keys:
+            log.info(f"Afspraak '{app['name']}' op {start_iso} bestaat al (key match), overslaan.")
+            continue
+
+        log.info(f"Toevoegen aan agenda: {app['name']} op {start_iso} - {end_iso}")
+        await task.executor(
+            hass.services.call,
+            "script",
+            "voeg_agenda_item_toe",
+            {
+                "entity_id": calendar_entity,
+                "summary": app['name'],
+                "description": "Afspraak uit TXT agenda",
+                "start_date_time": start_iso,
+                "end_date_time": end_iso,
+            }
+        )
+        await asyncio.sleep(3.0)
 
     log.info("Agenda synchronisatie voltooid.")

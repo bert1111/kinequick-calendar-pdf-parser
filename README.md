@@ -1,5 +1,5 @@
 # kinequick-calendar-pdf-parser
-Easily add kinequick calendar events to google calendar with python and Home Assistant
+Easily add kinequick calendar events to google calendar with pyscript and Home Assistant
 
 Prerequisites:
 
@@ -37,7 +37,7 @@ mode: queued
 max: 100
 sequence:
   - data:
-      entity_id: "{{ entity_id }}"
+      entity_id: calendar.your_agenda <= change to your entity
       summary: "{{ summary }}"
       description: "{{ description }}"
       start_date_time: "{{ start_date_time }}"
