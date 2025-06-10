@@ -60,8 +60,7 @@ Reboot (For the Shell command to be able to run)
 Warning: Removal of appointments via this script is not (yet) possible due to the Google Calendar integration not having this action available to call. 
 So this has to happen manually in Google Calender itself or via the UI in the calendar in Home Assistant.
 
-ToDo:
--Prevent double entries when the script is run twice for the same week.
+Added prevention for double entries. When a double entry is detected it generates a log in /config/logs.
 
 
  
