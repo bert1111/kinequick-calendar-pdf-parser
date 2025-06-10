@@ -14,8 +14,9 @@ pyscript:
 ```
 3. Have Google Calendar set up in Home assistant.
 
-For the script to work your "agenda.txt" file has to be in the "www" folder reachable via Samba.
-I added this shell command to do an automation to get it there before I call my script so I don't have to give access to the www folder to anyone.
+For the script to work, your "agenda.txt" file has to be in the "www" folder, reachable via Samba.
+I added this shell command (put also in configuration.yaml) to do an automation to get it there before I call my script,
+so I don't have to give access to the www folder to anyone.
 
 ```
 shell_command:
@@ -24,7 +25,11 @@ shell_command:
 
 The /media/YourAgenda is a networkshare I added to Home Assistant via config/storage and mount it there.
 
-4. First add a script in /config/script/dashboard
+
+Installation
+____________
+
+First add a script in /config/script/dashboard
 
 ```
 alias: Voeg agenda-item toe
@@ -40,10 +45,10 @@ sequence:
     action: calendar.create_event
 ```
 
-Second, copy both files "pdf_agenda_sync_via_txt.py" and "requirements.txt" to the pyscript folder, and change your calendar name.
+Second, copy both files "pdf_agenda_sync_via_txt.py" and "requirements.txt" to the pyscript folder, and change your calendar name on line 109.
 Reboot (For the Shell command to be able to run)
 
-5. Now you can make an automation to run automatically every week or sooner or via a button.
+   Now you can make an automation to run automatically every week or sooner or via a button.
    In my case the shell command has to run first, but this is not necessary if you save the file straight to the "www" folder. (Not recommended)
 
 	To make the file you need, you have to open the KineQuick calendar and click print.
