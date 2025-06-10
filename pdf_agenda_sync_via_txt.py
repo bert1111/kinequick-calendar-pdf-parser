@@ -44,6 +44,7 @@ def parse_agenda(normalized_lines):
     current_hour = None
     current_quarter = 0
     i = date_line_idx + 1
+    year = datetime.now().year  # Jaartal toegevoegd
     while i < len(normalized_lines):
         line = normalized_lines[i]
         cols = line.split('|')[1:-1]
@@ -81,7 +82,8 @@ def parse_agenda(normalized_lines):
                 if date_str == "-":
                     continue
                 try:
-                    dt_start = datetime.strptime(f"{date_str} {current_hour}", "%d/%m %H:%M")
+                    # Jaartal toegevoegd aan de datum-string
+                    dt_start = datetime.strptime(f"{date_str}/{year} {current_hour}", "%d/%m/%Y %H:%M")
                 except Exception as e:
                     log.error(f"Fout bij datum/tijd: {e} (kolom {col}, waarde '{text}')")
                     continue
