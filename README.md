@@ -45,7 +45,7 @@ sequence:
     action: calendar.create_event
 ```
 
-Second, copy both files "pdf_agenda_sync_via_txt.py" and "requirements.txt" to the pyscript folder, and change your calendar name on line 109.
+Second, copy both files "pdf_agenda_sync_via_txt.py" and "requirements.txt" to the pyscript folder, and change your calendar name on line 119.
 Reboot (For the Shell command to be able to run)
 
    Now you can make an automation to run automatically every week or sooner or via a button.
