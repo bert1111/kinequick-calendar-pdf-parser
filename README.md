@@ -24,7 +24,7 @@ shell_command:
 
 The /media/YourAgenda is a networkshare I added to Home Assistant via config/storage and mount it there.
 
-First add a script in /config/script/dashboard
+4. First add a script in /config/script/dashboard
 
 ```
 alias: Voeg agenda-item toe
@@ -43,8 +43,8 @@ sequence:
 Second, copy both files "pdf_agenda_sync_via_txt.py" and "requirements.txt" to the pyscript folder, and change your calendar name.
 Reboot (For the Shell command to be able to run)
 
-Now you can make an automation to run automatically every week or sooner or via a button.
-In my case the shell command has to run first, but this is not necessary if you save the file straight to the "www" folder. (Not recommended)
+5. Now you can make an automation to run automatically every week or sooner or via a button.
+   In my case the shell command has to run first, but this is not necessary if you save the file straight to the "www" folder. (Not recommended)
 
 	To make the file you need, you have to open the KineQuick calendar and click print.
 	(I use "Foxit PDF Reader" but any pdf reader that can save as "txt" format will do I think, but that's not tested)
