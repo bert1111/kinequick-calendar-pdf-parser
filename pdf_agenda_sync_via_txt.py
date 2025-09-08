@@ -45,56 +45,121 @@ def parse_agenda(normalized_lines):
     current_quarter = 0
     i = date_line_idx + 1
     year = datetime.now().year  # Jaartal toegevoegd
+    
     while i < len(normalized_lines):
         line = normalized_lines[i]
         cols = line.split('|')[1:-1]
-        left = cols[0].strip()
-        right = cols[-1].strip()
-        m_time = re.match(r"^(\d{2}:\d{2})$", left)
-        m_time_r = re.match(r"^(\d{2}:\d{2})$", right)
-        if m_time:
-            current_hour = m_time.group(1)
+        
+        left = cols[0].strip() if len(cols) > 0 else ""
+        right = cols[-1].strip() if len(cols) > 0 else ""
+        
+        # Check voor hoofdtijd (HH:MM) in linker of rechter kolom
+        m_time_left = re.match(r"^(\d{2}:\d{2})$", left)
+        m_time_right = re.match(r"^(\d{2}:\d{2})$", right)
+        
+        if m_time_left:
+            current_hour = m_time_left.group(1)
             current_quarter = 0
-            i += 1
-            continue
-        elif m_time_r:
-            current_hour = m_time_r.group(1)
+            log.debug(f"Tijd gevonden links: {current_hour}")
+        elif m_time_right:
+            current_hour = m_time_right.group(1)
             current_quarter = 0
-            i += 1
-            continue
-        m_quarter = re.match(r"^(15|30|45)$", left)
-        m_quarter_r = re.match(r"^(15|30|45)$", right)
-        if m_quarter and current_hour:
-            current_quarter = int(m_quarter.group(1))
-            i += 1
-            continue
-        elif m_quarter_r and current_hour:
-            current_quarter = int(m_quarter_r.group(1))
-            i += 1
-            continue
-        if not current_hour:
-            i += 1
-            continue
-        for col in range(NUM_DAYS):
-            text = cols[col+1].strip()
-            if text and text != SPACER and not re.match(r"^\d+$", text):
-                date_str = date_cols[col]
-                if date_str == "-":
+            log.debug(f"Tijd gevonden rechts: {current_hour}")
+        
+        # Check voor kwartier (15, 30, 45) in linker of rechter kolom
+        m_quarter_left = re.match(r"^(15|30|45)$", left)
+        m_quarter_right = re.match(r"^(15|30|45)$", right)
+        
+        if m_quarter_left and current_hour:
+            current_quarter = int(m_quarter_left.group(1))
+            log.debug(f"Kwartier gevonden links: {current_quarter}")
+        elif m_quarter_right and current_hour:
+            current_quarter = int(m_quarter_right.group(1))
+            log.debug(f"Kwartier gevonden rechts: {current_quarter}")
+        
+        # Verwerk afspraken als we een current_hour hebben
+        if current_hour:
+            # Controleer of er daadwerkelijk afspraken op deze regel staan
+            has_appointments = False
+            for col in range(NUM_DAYS):
+                if col + 1 >= len(cols):
                     continue
-                try:
-                    # Jaartal toegevoegd aan de datum-string
-                    dt_start = datetime.strptime(f"{date_str}/{year} {current_hour}", "%d/%m/%Y %H:%M")
-                except Exception as e:
-                    log.error(f"Fout bij datum/tijd: {e} (kolom {col}, waarde '{text}')")
-                    continue
-                dt_start += timedelta(minutes=current_quarter)
-                dt_end = dt_start + timedelta(minutes=30)
-                appointments.append({
-                    "date": date_str,
-                    "start_time": dt_start.strftime("%H:%M"),
-                    "end_time": dt_end.strftime("%H:%M"),
-                    "name": text
-                })
+                text = cols[col+1].strip()
+                if (text and text != SPACER and 
+                    not re.match(r"^\d+$", text) and 
+                    not re.match(r"^\d{2}:\d{2}$", text) and
+                    not re.match(r"^(15|30|45)$", text)):
+                    has_appointments = True
+                    break
+            
+            if has_appointments:
+                # Intelligente tijdbepaling gebaseerd op patroonherkenning
+                appointment_quarter = current_quarter
+                
+                # Heuristiek: als current_quarter 15 of 45 is, probeer te bepalen
+                # of dit echt kwartier-afspraken zijn of gewoon positionering
+                if current_quarter == 15 or current_quarter == 45:
+                    # Check de volgende regels om te zien of er een patroon is
+                    next_appointments_at_30 = False
+                    if i + 1 < len(normalized_lines):
+                        next_line = normalized_lines[i + 1]
+                        next_cols = next_line.split('|')[1:-1]
+                        next_left = next_cols[0].strip() if len(next_cols) > 0 else ""
+                        next_right = next_cols[-1].strip() if len(next_cols) > 0 else ""
+                        
+                        # Check of de volgende regel 30 is met afspraken
+                        if (next_left == "30" or next_right == "30"):
+                            for col in range(NUM_DAYS):
+                                if col + 1 >= len(next_cols):
+                                    continue
+                                next_text = next_cols[col+1].strip()
+                                if (next_text and next_text != SPACER and 
+                                    not re.match(r"^\d+$", next_text) and 
+                                    not re.match(r"^\d{2}:\d{2}$", next_text) and
+                                    not re.match(r"^(15|30|45)$", next_text)):
+                                    next_appointments_at_30 = True
+                                    break
+                    
+                    # Als er geen afspraken op 30 zijn, zijn de 15/45 afspraken waarschijnlijk op het hele uur
+                    if not next_appointments_at_30 and current_quarter == 15:
+                        log.debug(f"Heuristiek: afspraken op regel 15 zonder 30-afspraken -> waarschijnlijk hele uur")
+                        appointment_quarter = 0
+                    elif not next_appointments_at_30 and current_quarter == 45:
+                        log.debug(f"Heuristiek: afspraken op regel 45 zonder 30-afspraken -> waarschijnlijk halve uur")
+                        appointment_quarter = 30
+                
+                # Verwerk afspraken in de dagkolommen (kolom 1 tot NUM_DAYS)
+                for col in range(NUM_DAYS):
+                    if col + 1 >= len(cols):  # Voorkom index out of bounds
+                        continue
+                        
+                    text = cols[col+1].strip()
+                    # Accepteer alle tekst die niet een tijd, kwartier, spacer of puur nummer is
+                    if (text and text != SPACER and 
+                        not re.match(r"^\d+$", text) and 
+                        not re.match(r"^\d{2}:\d{2}$", text) and
+                        not re.match(r"^(15|30|45)$", text)):
+                        
+                        date_str = date_cols[col]
+                        if date_str == "-":
+                            continue
+                        try:
+                            # Jaartal toegevoegd aan de datum-string
+                            dt_start = datetime.strptime(f"{date_str}/{year} {current_hour}", "%d/%m/%Y %H:%M")
+                        except Exception as e:
+                            log.error(f"Fout bij datum/tijd: {e} (kolom {col}, waarde '{text}')")
+                            continue
+                        dt_start += timedelta(minutes=appointment_quarter)
+                        dt_end = dt_start + timedelta(minutes=30)
+                        
+                        log.debug(f"Afspraak toegevoegd: {text} op {dt_start} (regel kwartier: {current_quarter} -> afspraaktijd: {appointment_quarter})")
+                        appointments.append({
+                            "date": date_str,
+                            "start_time": dt_start.strftime("%H:%M"),
+                            "end_time": dt_end.strftime("%H:%M"),
+                            "name": text
+                        })
+        
         i += 1
     return appointments
 
