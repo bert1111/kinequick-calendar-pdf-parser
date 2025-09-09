@@ -44,6 +44,24 @@ sequence:
       end_date_time: "{{ end_date_time }}"
     action: calendar.create_event
 ```
+```
+Automation example
+
+alias: Synchroniseer Your Agenda
+description: ""
+triggers:
+  - event_type: call_service
+    event_data:
+      service: press
+      service_data:
+        entity_id: input_button.synchroniseer_your_agenda
+    trigger: event
+actions:
+  - action: shell_command.kopieer_agenda
+  - delay:
+      seconds: 15
+  - action: pyscript.agenda_sync_txt
+```
 
 Second, copy both files "pdf_agenda_sync_via_txt.py" and "requirements.txt" to the pyscript folder, and change your calendar name on line 119.
 Reboot (For the Shell command to be able to run)
